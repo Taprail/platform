@@ -1,0 +1,13 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# Server (Rust)
+server/target/
+server/.env
+
+# Dashboard (Node/Vite)
+dashboard/node_modules/
+dashboard/dist/
+dashboard/.env
+dashboard/.env.local
