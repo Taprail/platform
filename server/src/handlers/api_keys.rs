@@ -39,44 +39,80 @@ pub async fn create_api_keys(
 
     let label = body.label.clone().unwrap_or_else(|| "Default".to_string());
 
-    let test_key = generate_raw_key("symble_test");
-    let live_key = generate_raw_key("symble_live");
-
-    let test_hash = hash_key(&test_key);
-    let live_hash = hash_key(&live_key);
-
-    let test_last4 = &test_key[test_key.len() - 4..];
-    let live_last4 = &live_key[live_key.len() - 4..];
-
-    let test_id = Uuid::new_v4();
-    let live_id = Uuid::new_v4();
-
-    sqlx::query(
-        "INSERT INTO api_keys (id, business_id, label, key_prefix, key_hash, last4, environment) \
-         VALUES ($1, $2, $3, 'symble_test', $4, $5, 'test'), \
-                ($6, $7, $8, 'symble_live', $9, $10, 'live')"
+    // Check KYB status for live key eligibility
+    let business: crate::db::Business = sqlx::query_as(
+        "SELECT * FROM businesses WHERE id = $1"
     )
-    .bind(test_id).bind(business_id).bind(&label).bind(&test_hash).bind(test_last4)
-    .bind(live_id).bind(business_id).bind(&label).bind(&live_hash).bind(live_last4)
-    .execute(pool.get_ref())
+    .bind(business_id)
+    .fetch_one(pool.get_ref())
     .await?;
 
-    crate::handlers::audit::log_audit(
-        pool.get_ref(), business_id, None, Some(&claims.email),
-        "create", "api_key", Some(&format!("{},{}", test_id, live_id)),
-        Some(serde_json::json!({"label": &label})),
-        crate::handlers::audit::get_ip(&req).as_deref(),
-    ).await;
+    let kyb_approved = business.kyb_status == "approved";
 
-    Ok(HttpResponse::Ok().json(ApiResponse::success(
-        ApiKeyCreatedResponse {
-            test_key,
-            live_key,
-            test_key_id: test_id,
-            live_key_id: live_id,
-        },
-        "API keys created. Store these securely - they won't be shown again.",
-    )))
+    let test_key = generate_raw_key("symble_test");
+    let test_hash = hash_key(&test_key);
+    let test_last4 = &test_key[test_key.len() - 4..];
+    let test_id = Uuid::new_v4();
+
+    if kyb_approved {
+        let live_key = generate_raw_key("symble_live");
+        let live_hash = hash_key(&live_key);
+        let live_last4 = &live_key[live_key.len() - 4..];
+        let live_id = Uuid::new_v4();
+
+        sqlx::query(
+            "INSERT INTO api_keys (id, business_id, label, key_prefix, key_hash, last4, environment) \
+             VALUES ($1, $2, $3, 'symble_test', $4, $5, 'test'), \
+                    ($6, $7, $8, 'symble_live', $9, $10, 'live')"
+        )
+        .bind(test_id).bind(business_id).bind(&label).bind(&test_hash).bind(test_last4)
+        .bind(live_id).bind(business_id).bind(&label).bind(&live_hash).bind(live_last4)
+        .execute(pool.get_ref())
+        .await?;
+
+        crate::handlers::audit::log_audit(
+            pool.get_ref(), business_id, None, Some(&claims.email),
+            "create", "api_key", Some(&format!("{},{}", test_id, live_id)),
+            Some(serde_json::json!({"label": &label})),
+            crate::handlers::audit::get_ip(&req).as_deref(),
+        ).await;
+
+        Ok(HttpResponse::Ok().json(ApiResponse::success(
+            ApiKeyCreatedResponse {
+                test_key,
+                live_key,
+                test_key_id: test_id,
+                live_key_id: live_id,
+            },
+            "API keys created. Store these securely - they won't be shown again.",
+        )))
+    } else {
+        sqlx::query(
+            "INSERT INTO api_keys (id, business_id, label, key_prefix, key_hash, last4, environment) \
+             VALUES ($1, $2, $3, 'symble_test', $4, $5, 'test')"
+        )
+        .bind(test_id).bind(business_id).bind(&label).bind(&test_hash).bind(test_last4)
+        .execute(pool.get_ref())
+        .await?;
+
+        crate::handlers::audit::log_audit(
+            pool.get_ref(), business_id, None, Some(&claims.email),
+            "create", "api_key", Some(&test_id.to_string()),
+            Some(serde_json::json!({"label": &label, "live_key_skipped": true})),
+            crate::handlers::audit::get_ip(&req).as_deref(),
+        ).await;
+
+        Ok(HttpResponse::Ok().json(serde_json::json!({
+            "success": true,
+            "data": {
+                "test_key": test_key,
+                "test_key_id": test_id,
+                "live_key": null,
+                "live_key_id": null,
+            },
+            "message": "Test API key created. Complete KYB verification to get live API keys."
+        })))
+    }
 }
 
 pub async fn list_api_keys(

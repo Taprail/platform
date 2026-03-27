@@ -16,45 +16,132 @@ pub async fn list_transactions(
     let business_id: Uuid = claims.business_id.parse()
         .map_err(|_| ApiError::Internal("Invalid business ID".into()))?;
 
-    let (txns, total): (Vec<crate::db::Transaction>, i64) = if let Some(ref status) = query.status {
-        let txns: Vec<crate::db::Transaction> = sqlx::query_as(
-            "SELECT * FROM transactions WHERE business_id = $1 AND status = $2 ORDER BY created_at DESC LIMIT $3 OFFSET $4"
-        )
-        .bind(business_id)
-        .bind(status)
-        .bind(query.limit())
-        .bind(query.offset())
-        .fetch_all(pool.get_ref())
-        .await?;
+    // Build dynamic WHERE clauses
+    let mut conditions = vec!["business_id = $1".to_string()];
+    let mut param_idx = 2u32;
 
-        let total: (i64,) = sqlx::query_as(
-            "SELECT COUNT(*) FROM transactions WHERE business_id = $1 AND status = $2"
-        )
-        .bind(business_id)
-        .bind(status)
-        .fetch_one(pool.get_ref())
-        .await?;
-
-        (txns, total.0)
+    let _env_idx = if query.environment.is_some() {
+        let idx = param_idx;
+        conditions.push(format!("environment = ${}", idx));
+        param_idx += 1;
+        Some(idx)
     } else {
-        let txns: Vec<crate::db::Transaction> = sqlx::query_as(
-            "SELECT * FROM transactions WHERE business_id = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3"
-        )
-        .bind(business_id)
-        .bind(query.limit())
-        .bind(query.offset())
-        .fetch_all(pool.get_ref())
-        .await?;
-
-        let total: (i64,) = sqlx::query_as(
-            "SELECT COUNT(*) FROM transactions WHERE business_id = $1"
-        )
-        .bind(business_id)
-        .fetch_one(pool.get_ref())
-        .await?;
-
-        (txns, total.0)
+        None
     };
+
+    let _status_idx = if query.status.is_some() {
+        let idx = param_idx;
+        conditions.push(format!("status = ${}", idx));
+        param_idx += 1;
+        Some(idx)
+    } else {
+        None
+    };
+
+    let _search_idx = if query.search.is_some() {
+        let idx = param_idx;
+        conditions.push(format!(
+            "(id::text ILIKE '%' || ${idx} || '%' OR merchant_ref ILIKE '%' || ${idx} || '%' OR COALESCE(payment_reference, '') ILIKE '%' || ${idx} || '%')"
+        ));
+        param_idx += 1;
+        Some(idx)
+    } else {
+        None
+    };
+
+    let _from_idx = if query.from.is_some() {
+        let idx = param_idx;
+        conditions.push(format!("created_at >= ${}::timestamptz", idx));
+        param_idx += 1;
+        Some(idx)
+    } else {
+        None
+    };
+
+    let _to_idx = if query.to.is_some() {
+        let idx = param_idx;
+        conditions.push(format!("created_at <= ${}::timestamptz", idx));
+        param_idx += 1;
+        Some(idx)
+    } else {
+        None
+    };
+
+    let _customer_idx = if query.customer_id.is_some() {
+        let idx = param_idx;
+        conditions.push(format!("customer_id = ${}::uuid", idx));
+        param_idx += 1;
+        Some(idx)
+    } else {
+        None
+    };
+
+    let limit_idx = param_idx;
+    param_idx += 1;
+    let offset_idx = param_idx;
+
+    let where_clause = conditions.join(" AND ");
+
+    let select_sql = format!(
+        "SELECT * FROM transactions WHERE {} ORDER BY created_at DESC LIMIT ${} OFFSET ${}",
+        where_clause, limit_idx, offset_idx
+    );
+
+    let count_sql = format!(
+        "SELECT COUNT(*) FROM transactions WHERE {}",
+        where_clause
+    );
+
+    // Build and execute the select query
+    let mut select_q = sqlx::query_as::<_, crate::db::Transaction>(&select_sql)
+        .bind(business_id);
+
+    if let Some(ref env) = query.environment {
+        select_q = select_q.bind(env);
+    }
+    if let Some(ref status) = query.status {
+        select_q = select_q.bind(status);
+    }
+    if let Some(ref search) = query.search {
+        select_q = select_q.bind(search);
+    }
+    if let Some(ref from) = query.from {
+        select_q = select_q.bind(from);
+    }
+    if let Some(ref to) = query.to {
+        select_q = select_q.bind(to);
+    }
+    if let Some(ref cid) = query.customer_id {
+        select_q = select_q.bind(cid);
+    }
+    select_q = select_q.bind(query.limit()).bind(query.offset());
+
+    let txns: Vec<crate::db::Transaction> = select_q.fetch_all(pool.get_ref()).await?;
+
+    // Build and execute the count query
+    let mut count_q = sqlx::query_as::<_, (i64,)>(&count_sql)
+        .bind(business_id);
+
+    if let Some(ref env) = query.environment {
+        count_q = count_q.bind(env);
+    }
+    if let Some(ref status) = query.status {
+        count_q = count_q.bind(status);
+    }
+    if let Some(ref search) = query.search {
+        count_q = count_q.bind(search);
+    }
+    if let Some(ref from) = query.from {
+        count_q = count_q.bind(from);
+    }
+    if let Some(ref to) = query.to {
+        count_q = count_q.bind(to);
+    }
+    if let Some(ref cid) = query.customer_id {
+        count_q = count_q.bind(cid);
+    }
+
+    let total: (i64,) = count_q.fetch_one(pool.get_ref()).await?;
 
     let txns: Vec<TransactionResponse> = txns.into_iter().map(Into::into).collect();
 
@@ -62,7 +149,7 @@ pub async fn list_transactions(
         "success": true,
         "data": txns,
         "message": "Transactions retrieved",
-        "total": total
+        "total": total.0
     })))
 }
 

@@ -6,6 +6,7 @@ use uuid::Uuid;
 pub mod session_status {
     pub const PENDING: &str = "pending";
     pub const LOCKED: &str = "locked";
+    pub const AWAITING_OTP: &str = "awaiting_otp";
     pub const PAID: &str = "paid";
     pub const EXPIRED: &str = "expired";
     pub const CANCELLED: &str = "cancelled";
@@ -24,6 +25,13 @@ pub struct PaymentSession {
     pub metadata: Option<serde_json::Value>,
     pub expires_at: DateTime<Utc>,
     pub created_at: DateTime<Utc>,
+    pub environment: String,
+    pub provider_ref: Option<String>,
+    pub payment_reference: Option<String>,
+    pub encrypted_auth_data: Option<String>,
+    pub otp_attempts: i32,
+    pub computed_fee: Option<f64>,
+    pub computed_net_amount: Option<f64>,
 }
 
 #[derive(Debug, Serialize)]
@@ -74,4 +82,27 @@ pub struct VerifySessionRequest {
 pub struct ChargeSessionRequest {
     pub payment_token: String,
     pub email: String,
+}
+
+/// OTP submission for infra-tier sessions awaiting OTP validation.
+#[derive(Debug, Deserialize)]
+pub struct InfraOtpRequest {
+    pub otp: String,
+}
+
+/// Request body for infra-tier session completion.
+/// Card data is RSA-encrypted server-side before sending to Interswitch.
+#[derive(Debug, Deserialize)]
+pub struct InfraCompleteRequest {
+    /// Customer identifier (email or phone).
+    pub customer_id: String,
+    /// Card PAN read from NFC.
+    pub pan: String,
+    /// Card PIN entered by customer.
+    pub pin: String,
+    /// Expiry date in YYMM format.
+    pub expiry_date: String,
+    /// CVV2/CVC2 (for CNP fallback; may be empty for NFC contactless).
+    #[serde(default)]
+    pub cvv: String,
 }

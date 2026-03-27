@@ -46,6 +46,7 @@ pub struct WebhookDelivery {
     pub max_attempts: i32,
     pub next_retry_at: Option<DateTime<Utc>>,
     pub last_response_code: Option<i32>,
+    pub last_response_body: Option<String>,
     pub created_at: DateTime<Utc>,
     pub delivered_at: Option<DateTime<Utc>>,
 }
@@ -57,7 +58,9 @@ pub struct WebhookDeliveryResponse {
     pub event_type: String,
     pub status: String,
     pub attempts: i32,
+    pub payload: serde_json::Value,
     pub last_response_code: Option<i32>,
+    pub last_response_body: Option<String>,
     pub created_at: DateTime<Utc>,
     pub delivered_at: Option<DateTime<Utc>>,
 }
@@ -68,9 +71,11 @@ impl From<WebhookDelivery> for WebhookDeliveryResponse {
             id: d.id,
             endpoint_id: d.endpoint_id,
             event_type: d.event_type,
+            payload: d.payload,
             status: d.status,
             attempts: d.attempts,
             last_response_code: d.last_response_code,
+            last_response_body: d.last_response_body,
             created_at: d.created_at,
             delivered_at: d.delivered_at,
         }

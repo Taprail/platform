@@ -1,0 +1,56 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: symble_db
+      POSTGRES_USER: taprail
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-taprail_dev}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U taprail -d symble_db"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  server:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    image: ghcr.io/taprail/server:latest
+    ports:
+      - "8082:8082"
+    environment:
+      DATABASE_URL: postgres://taprail:${POSTGRES_PASSWORD:-taprail_dev}@postgres:5432/symble_db
+      JWT_SECRET: ${JWT_SECRET:-taprail-dev-secret-change-in-production}
+      HOST: 0.0.0.0
+      PORT: 8082
+      DEFAULT_FEE_PERCENT: "1.5"
+      DEFAULT_FEE_CAP: "2000.0"
+      RUST_LOG: info
+      ISW_PASSPORT_URL: ${ISW_PASSPORT_URL:-https://qa.interswitchng.com}
+      ISW_BASE_URL: ${ISW_BASE_URL:-https://qa.interswitchng.com}
+      ISW_CLIENT_ID: ${ISW_CLIENT_ID:-}
+      ISW_CLIENT_SECRET: ${ISW_CLIENT_SECRET:-}
+      ISW_MERCHANT_CODE: ${ISW_MERCHANT_CODE:-}
+      ISW_PAY_ITEM_ID_CARD: ${ISW_PAY_ITEM_ID_CARD:-}
+      ISW_RSA_MODULUS: ${ISW_RSA_MODULUS:-}
+      ISW_RSA_EXPONENT: ${ISW_RSA_EXPONENT:-010001}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  dashboard:
+    build:
+      context: ./dashboard
+      dockerfile: Dockerfile
+    image: ghcr.io/taprail/dashboard:latest
+    ports:
+      - "3000:80"
+    depends_on:
+      - server
+
+volumes:
+  pgdata:

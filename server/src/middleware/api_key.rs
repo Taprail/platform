@@ -12,6 +12,7 @@ pub struct BusinessContext {
     pub environment: String,
     pub fee_percent: f64,
     pub fee_cap: f64,
+    pub scopes: Vec<String>,
 }
 
 pub async fn extract_business_context(
@@ -30,8 +31,8 @@ pub async fn extract_business_context(
     hasher.update(raw_key.as_bytes());
     let key_hash = hex::encode(hasher.finalize());
 
-    let row: Option<(Uuid, String, String, f64, f64)> = sqlx::query_as(
-        "SELECT b.id, b.tier, ak.environment, b.fee_percent, b.fee_cap \
+    let row: Option<(Uuid, String, String, f64, f64, Vec<String>)> = sqlx::query_as(
+        "SELECT b.id, b.tier, ak.environment, b.fee_percent, b.fee_cap, ak.scopes \
          FROM api_keys ak \
          JOIN businesses b ON ak.business_id = b.id \
          WHERE ak.key_hash = $1 AND ak.is_active = TRUE AND b.status = 'active'"
@@ -41,7 +42,7 @@ pub async fn extract_business_context(
     .await
     .map_err(|e| ApiError::Internal(e.to_string()))?;
 
-    let (business_id, tier, environment, fee_percent, fee_cap) =
+    let (business_id, tier, environment, fee_percent, fee_cap, scopes) =
         row.ok_or_else(|| ApiError::Unauthorized("Invalid API key".into()))?;
 
     // Update last_used_at
@@ -56,5 +57,6 @@ pub async fn extract_business_context(
         environment,
         fee_percent,
         fee_cap,
+        scopes,
     })
 }

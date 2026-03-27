@@ -6,7 +6,11 @@ import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
 import { api } from '@/lib/api'
 import { useToast } from '@/hooks/use-toast'
-import { Pencil, X } from 'lucide-react'
+import { Link } from 'react-router-dom'
+import { HugeiconsIcon } from '@hugeicons/react'
+import PencilEdit01Icon from '@hugeicons/core-free-icons/PencilEdit01Icon'
+import Cancel01Icon from '@hugeicons/core-free-icons/Cancel01Icon'
+import Notification01Icon from '@hugeicons/core-free-icons/Notification01Icon'
 
 export default function Settings() {
   const { business, refreshBusiness } = useAuth()
@@ -90,27 +94,27 @@ export default function Settings() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-lg font-semibold tracking-tight">Settings</h1>
-        <p className="text-[13px] text-muted-foreground mt-0.5">Your business and integration details</p>
+        <h1 className="text-xl font-semibold tracking-tight">Settings</h1>
+        <p className="text-[13px] text-muted-foreground mt-1">Your business and integration details</p>
       </div>
 
       {loading ? (
-        <div className="grid gap-6 lg:grid-cols-2">
-          {[...Array(4)].map((_, i) => <Skeleton key={i} className="h-44 w-full" />)}
+        <div className="grid gap-5 lg:grid-cols-2">
+          {[...Array(4)].map((_, i) => <Skeleton key={i} className="h-44 w-full rounded-xl" />)}
         </div>
       ) : (
-        <div className="grid gap-6 lg:grid-cols-2">
+        <div className="grid gap-5 lg:grid-cols-2">
           {/* Business Info */}
-          <div className="rounded-lg border bg-white p-5">
-            <div className="flex items-center justify-between mb-3">
-              <p className="text-sm font-medium">Business</p>
+          <div className="rounded-xl border bg-card p-6 shadow-card">
+            <div className="flex items-center justify-between mb-4">
+              <p className="text-[11px] font-semibold text-muted-foreground/70 uppercase tracking-wider">Business</p>
               {!editing ? (
-                <button onClick={() => setEditing(true)} className="text-muted-foreground hover:text-foreground transition-colors">
-                  <Pencil className="h-3.5 w-3.5" />
+                <button onClick={() => setEditing(true)} className="text-muted-foreground/40 hover:text-foreground transition-colors">
+                  <HugeiconsIcon icon={PencilEdit01Icon} size={14} strokeWidth={1.5} />
                 </button>
               ) : (
-                <button onClick={() => { setEditing(false); setForm({ name: biz?.name || '', phone: biz?.phone || '' }) }} className="text-muted-foreground hover:text-foreground transition-colors">
-                  <X className="h-3.5 w-3.5" />
+                <button onClick={() => { setEditing(false); setForm({ name: biz?.name || '', phone: biz?.phone || '' }) }} className="text-muted-foreground/40 hover:text-foreground transition-colors">
+                  <HugeiconsIcon icon={Cancel01Icon} size={14} strokeWidth={1.5} />
                 </button>
               )}
             </div>
@@ -126,14 +130,14 @@ export default function Settings() {
                 </div>
                 <div className="space-y-1.5">
                   <label className="text-[13px] text-muted-foreground">Email</label>
-                  <Input value={biz?.email || ''} disabled className="opacity-60" />
+                  <Input value={biz?.email || ''} disabled className="opacity-50" />
                 </div>
                 <Button type="submit" disabled={saving} className="w-full">
                   {saving ? 'Saving...' : 'Save changes'}
                 </Button>
               </form>
             ) : (
-              <div className="divide-y">
+              <div className="divide-y divide-border/50">
                 <Field label="Name">{biz?.name}</Field>
                 <Field label="Email">{biz?.email}</Field>
                 <Field label="Phone">{biz?.phone || '-'}</Field>
@@ -142,9 +146,9 @@ export default function Settings() {
           </div>
 
           {/* Integration */}
-          <div className="rounded-lg border bg-white p-5">
-            <p className="text-sm font-medium mb-3">Integration</p>
-            <div className="divide-y">
+          <div className="rounded-xl border bg-card p-6 shadow-card">
+            <p className="text-[11px] font-semibold text-muted-foreground/70 uppercase tracking-wider mb-4">Integration</p>
+            <div className="divide-y divide-border/50">
               <Field label="Tier">
                 <Badge variant="secondary">
                   {biz?.tier === 'platform' ? 'Platform' : 'Infra'}
@@ -154,24 +158,24 @@ export default function Settings() {
                 <Badge variant="success">{biz?.status || 'active'}</Badge>
               </Field>
               <Field label="Webhook secret">
-                <span className="font-mono text-xs">{settings?.webhook_secret || '********'}</span>
+                <span className="font-mono text-[11px]">{settings?.webhook_secret || '********'}</span>
               </Field>
             </div>
           </div>
 
           {/* Fees */}
-          <div className="rounded-lg border bg-white p-5">
-            <p className="text-sm font-medium mb-3">Fees</p>
-            <div className="divide-y">
+          <div className="rounded-xl border bg-card p-6 shadow-card">
+            <p className="text-[11px] font-semibold text-muted-foreground/70 uppercase tracking-wider mb-4">Fees</p>
+            <div className="divide-y divide-border/50">
               <Field label="Percentage">{biz?.fee_percent || 1.5}%</Field>
               <Field label="Cap">NGN {(biz?.fee_cap || 2000).toLocaleString()}</Field>
             </div>
           </div>
 
           {/* Change Password */}
-          <div className="rounded-lg border bg-white p-5">
-            <div className="flex items-center justify-between mb-3">
-              <p className="text-sm font-medium">Security</p>
+          <div className="rounded-xl border bg-card p-6 shadow-card">
+            <div className="flex items-center justify-between mb-4">
+              <p className="text-[11px] font-semibold text-muted-foreground/70 uppercase tracking-wider">Security</p>
               {!changingPassword && (
                 <Button variant="outline" size="sm" onClick={() => setChangingPassword(true)}>
                   Change password
@@ -218,8 +222,24 @@ export default function Settings() {
                 </div>
               </form>
             ) : (
-              <p className="text-xs text-muted-foreground">Update your password to keep your account secure.</p>
+              <p className="text-[13px] text-muted-foreground">Update your password to keep your account secure.</p>
             )}
+          </div>
+
+          {/* Notification Preferences Link */}
+          <div className="rounded-xl border bg-card p-6 shadow-card lg:col-span-2">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-[11px] font-semibold text-muted-foreground/70 uppercase tracking-wider mb-1.5">Notifications</p>
+                <p className="text-[13px] text-muted-foreground">Configure which email notifications you receive.</p>
+              </div>
+              <Link to="/settings/notifications">
+                <Button variant="outline" size="sm">
+                  <HugeiconsIcon icon={Notification01Icon} size={14} strokeWidth={1.5} className="mr-1.5" />
+                  Manage
+                </Button>
+              </Link>
+            </div>
           </div>
         </div>
       )}
@@ -229,7 +249,7 @@ export default function Settings() {
 
 function Field({ label, children }) {
   return (
-    <div className="flex justify-between py-2.5 text-sm">
+    <div className="flex justify-between py-3 text-sm">
       <span className="text-muted-foreground">{label}</span>
       <span className="font-medium">{children}</span>
     </div>

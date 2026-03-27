@@ -13,6 +13,7 @@ pub struct ApiKey {
     pub last4: String,
     pub environment: String,
     pub is_active: bool,
+    pub scopes: Vec<String>,
     pub created_at: DateTime<Utc>,
     pub last_used_at: Option<DateTime<Utc>>,
 }
@@ -25,6 +26,7 @@ pub struct ApiKeyResponse {
     pub last4: String,
     pub environment: String,
     pub is_active: bool,
+    pub scopes: Vec<String>,
     pub created_at: DateTime<Utc>,
     pub last_used_at: Option<DateTime<Utc>>,
 }
@@ -38,6 +40,7 @@ impl From<ApiKey> for ApiKeyResponse {
             last4: k.last4,
             environment: k.environment,
             is_active: k.is_active,
+            scopes: k.scopes,
             created_at: k.created_at,
             last_used_at: k.last_used_at,
         }
@@ -55,4 +58,5 @@ pub struct ApiKeyCreatedResponse {
 #[derive(Debug, Deserialize)]
 pub struct CreateApiKeyRequest {
     pub label: Option<String>,
+    pub scopes: Option<Vec<String>>,
 }

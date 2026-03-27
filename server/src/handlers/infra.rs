@@ -72,8 +72,8 @@ pub async fn create_session(
     let signature = generate_signature(&payload, &business_secret);
 
     sqlx::query(
-        "INSERT INTO payment_sessions (id, business_id, merchant_ref, amount, nonce, status, signature, metadata, expires_at) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)"
+        "INSERT INTO payment_sessions (id, business_id, merchant_ref, amount, nonce, status, signature, metadata, expires_at, environment) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)"
     )
     .bind(session_id)
     .bind(ctx.business_id)
@@ -84,6 +84,7 @@ pub async fn create_session(
     .bind(&signature)
     .bind(&body.metadata)
     .bind(expires_at)
+    .bind(&ctx.environment)
     .execute(pool.get_ref())
     .await?;
 
@@ -214,8 +215,10 @@ pub async fn complete_session(
     pool: web::Data<PgPool>,
     req: HttpRequest,
     _config: web::Data<crate::config::AppConfig>,
+    isw_service: web::Data<crate::services::InterswitchPaymentService>,
     webhook_service: web::Data<crate::services::WebhookDeliveryService>,
     path: web::Path<Uuid>,
+    body: web::Json<crate::db::InfraCompleteRequest>,
 ) -> Result<HttpResponse, ApiError> {
     let ctx = get_ctx(&req, pool.get_ref()).await?;
     let session_id = path.into_inner();
@@ -236,38 +239,269 @@ pub async fn complete_session(
 
     let fee = (session.amount * ctx.fee_percent / 100.0).min(ctx.fee_cap);
     let net_amount = session.amount - fee;
+    let amount_kobo = (session.amount * 100.0) as i64;
+    let payment_reference = format!("taprail_{}", Uuid::new_v4());
 
-    // Create transaction
-    sqlx::query(
-        "INSERT INTO transactions (business_id, session_id, amount, fee, net_amount, status, merchant_ref, metadata) \
-         VALUES ($1, $2, $3, $4, $5, 'success', $6, $7)"
+    let isw_result = isw_service
+        .purchase(
+            amount_kobo,
+            &payment_reference,
+            &body.customer_id,
+            &body.pan,
+            &body.pin,
+            &body.expiry_date,
+            &body.cvv,
+        )
+        .await;
+
+    match isw_result {
+        Ok((resp, auth_data)) if resp.needs_otp() => {
+            // T0: OTP required — park the session and wait for OTP submission
+            let otp_message = resp.message.as_deref().unwrap_or("OTP sent to cardholder");
+
+            sqlx::query(
+                "UPDATE payment_sessions SET status = $1, provider_ref = $2, payment_reference = $3, encrypted_auth_data = $4, computed_fee = $5, computed_net_amount = $6 WHERE id = $7"
+            )
+            .bind(session_status::AWAITING_OTP)
+            .bind(&resp.payment_id)
+            .bind(&payment_reference)
+            .bind(&auth_data)
+            .bind(fee)
+            .bind(net_amount)
+            .bind(session_id)
+            .execute(pool.get_ref())
+            .await?;
+
+            Ok(HttpResponse::Ok().json(serde_json::json!({
+                "success": true,
+                "data": {
+                    "session_id": session_id,
+                    "status": "awaiting_otp",
+                    "message": otp_message,
+                },
+                "message": "OTP required"
+            })))
+        }
+        Ok((resp, _auth_data)) => {
+            // Approved — create success transaction with enriched metadata
+            let mut txn_metadata = session.metadata.clone().unwrap_or_else(|| serde_json::json!({}));
+            if let Some(obj) = txn_metadata.as_object_mut() {
+                if let Some(ref rrn) = resp.retrieval_reference_number {
+                    obj.insert("isw_rrn".to_string(), serde_json::json!(rrn));
+                }
+                if let Some(ref code) = resp.response_code {
+                    obj.insert("isw_response_code".to_string(), serde_json::json!(code));
+                }
+            }
+
+            sqlx::query(
+                "INSERT INTO transactions (business_id, session_id, amount, fee, net_amount, status, payment_reference, merchant_ref, metadata, provider_reference, environment) \
+                 VALUES ($1, $2, $3, $4, $5, 'success', $6, $7, $8, $9, $10)"
+            )
+            .bind(ctx.business_id)
+            .bind(session_id)
+            .bind(session.amount)
+            .bind(fee)
+            .bind(net_amount)
+            .bind(&payment_reference)
+            .bind(&session.merchant_ref)
+            .bind(&txn_metadata)
+            .bind(&resp.payment_id)
+            .bind(&ctx.environment)
+            .execute(pool.get_ref())
+            .await?;
+
+            sqlx::query("UPDATE payment_sessions SET status = $1, payment_reference = $2 WHERE id = $3")
+                .bind(session_status::PAID)
+                .bind(&payment_reference)
+                .bind(session_id)
+                .execute(pool.get_ref())
+                .await?;
+
+            webhook_service.dispatch(pool.get_ref(), ctx.business_id, "session.paid", serde_json::json!({
+                "session_id": session_id,
+                "amount": session.amount,
+                "fee": fee,
+                "net_amount": net_amount,
+                "payment_reference": payment_reference,
+                "isw_payment_id": resp.payment_id,
+                "isw_rrn": resp.retrieval_reference_number,
+                "status": "paid",
+            })).await;
+
+            Ok(HttpResponse::Ok().json(ApiResponse::<()>::success((), "Payment processed")))
+        }
+        Err(err) => {
+            let failure_reason = format!("{}", err);
+            sqlx::query(
+                "INSERT INTO transactions (business_id, session_id, amount, fee, net_amount, status, payment_reference, merchant_ref, metadata, failure_reason, environment) \
+                 VALUES ($1, $2, $3, $4, $5, 'failed', $6, $7, $8, $9, $10)"
+            )
+            .bind(ctx.business_id)
+            .bind(session_id)
+            .bind(session.amount)
+            .bind(fee)
+            .bind(net_amount)
+            .bind(&payment_reference)
+            .bind(&session.merchant_ref)
+            .bind(&session.metadata)
+            .bind(&failure_reason)
+            .bind(&ctx.environment)
+            .execute(pool.get_ref())
+            .await?;
+
+            webhook_service.dispatch(pool.get_ref(), ctx.business_id, "charge.failed", serde_json::json!({
+                "session_id": session_id,
+                "payment_reference": payment_reference,
+                "error": &failure_reason,
+            })).await;
+
+            Err(ApiError::payment_failed(
+                format!("Payment declined: {}", failure_reason),
+                None,
+            ))
+        }
+    }
+}
+
+pub async fn submit_otp(
+    pool: web::Data<PgPool>,
+    req: HttpRequest,
+    isw_service: web::Data<crate::services::InterswitchPaymentService>,
+    webhook_service: web::Data<crate::services::WebhookDeliveryService>,
+    path: web::Path<Uuid>,
+    body: web::Json<crate::db::InfraOtpRequest>,
+) -> Result<HttpResponse, ApiError> {
+    let ctx = get_ctx(&req, pool.get_ref()).await?;
+    let session_id = path.into_inner();
+
+    let session: Option<PaymentSession> = sqlx::query_as(
+        "SELECT * FROM payment_sessions WHERE id = $1 AND business_id = $2 FOR UPDATE"
     )
-    .bind(ctx.business_id)
     .bind(session_id)
-    .bind(session.amount)
-    .bind(fee)
-    .bind(net_amount)
-    .bind(&session.merchant_ref)
-    .bind(&session.metadata)
-    .execute(pool.get_ref())
+    .bind(ctx.business_id)
+    .fetch_optional(pool.get_ref())
     .await?;
 
-    // Update session
-    sqlx::query("UPDATE payment_sessions SET status = $1 WHERE id = $2")
-        .bind(session_status::PAID)
+    let session = session.ok_or_else(|| ApiError::NotFound("Session not found".into()))?;
+
+    if session.status != session_status::AWAITING_OTP {
+        return Err(ApiError::BadRequest("Session is not awaiting OTP".into()));
+    }
+
+    // Enforce OTP retry limit (max 3 attempts)
+    if session.otp_attempts >= 3 {
+        sqlx::query("UPDATE payment_sessions SET status = 'failed', encrypted_auth_data = NULL WHERE id = $1")
+            .bind(session_id)
+            .execute(pool.get_ref())
+            .await?;
+        return Err(ApiError::BadRequest("Maximum OTP attempts exceeded. Session has been cancelled.".into()));
+    }
+
+    // Increment OTP attempt counter
+    sqlx::query("UPDATE payment_sessions SET otp_attempts = otp_attempts + 1 WHERE id = $1")
         .bind(session_id)
         .execute(pool.get_ref())
         .await?;
 
-    webhook_service.dispatch(pool.get_ref(), ctx.business_id, "session.paid", serde_json::json!({
-        "session_id": session_id,
-        "amount": session.amount,
-        "fee": fee,
-        "net_amount": net_amount,
-        "status": "paid",
-    })).await;
+    let payment_id = session.provider_ref.as_deref()
+        .ok_or_else(|| ApiError::Internal("Missing ISW payment ID for OTP session".into()))?;
+    let payment_reference = session.payment_reference.as_deref()
+        .ok_or_else(|| ApiError::Internal("Missing payment reference for OTP session".into()))?;
+    let auth_data = session.encrypted_auth_data.as_deref()
+        .ok_or_else(|| ApiError::Internal("Missing auth data for OTP session".into()))?;
 
-    Ok(HttpResponse::Ok().json(ApiResponse::<()>::success((), "Session marked as paid")))
+    // Use stored fee from complete_session for consistency
+    let fee = session.computed_fee.unwrap_or_else(|| (session.amount * ctx.fee_percent / 100.0).min(ctx.fee_cap));
+    let net_amount = session.computed_net_amount.unwrap_or_else(|| session.amount - fee);
+
+    let otp_result = isw_service
+        .validate_otp(payment_id, auth_data, &body.otp)
+        .await;
+
+    match otp_result {
+        Ok(resp) => {
+            let mut txn_metadata = session.metadata.clone().unwrap_or_else(|| serde_json::json!({}));
+            if let Some(obj) = txn_metadata.as_object_mut() {
+                if let Some(ref rrn) = resp.retrieval_reference_number {
+                    obj.insert("isw_rrn".to_string(), serde_json::json!(rrn));
+                }
+                if let Some(ref code) = resp.response_code {
+                    obj.insert("isw_response_code".to_string(), serde_json::json!(code));
+                }
+            }
+
+            sqlx::query(
+                "INSERT INTO transactions (business_id, session_id, amount, fee, net_amount, status, payment_reference, merchant_ref, metadata, provider_reference, environment) \
+                 VALUES ($1, $2, $3, $4, $5, 'success', $6, $7, $8, $9, $10)"
+            )
+            .bind(ctx.business_id)
+            .bind(session_id)
+            .bind(session.amount)
+            .bind(fee)
+            .bind(net_amount)
+            .bind(payment_reference)
+            .bind(&session.merchant_ref)
+            .bind(&txn_metadata)
+            .bind(&resp.payment_id)
+            .bind(&ctx.environment)
+            .execute(pool.get_ref())
+            .await?;
+
+            sqlx::query("UPDATE payment_sessions SET status = $1, encrypted_auth_data = NULL WHERE id = $2")
+                .bind(session_status::PAID)
+                .bind(session_id)
+                .execute(pool.get_ref())
+                .await?;
+
+            webhook_service.dispatch(pool.get_ref(), ctx.business_id, "session.paid", serde_json::json!({
+                "session_id": session_id,
+                "amount": session.amount,
+                "fee": fee,
+                "net_amount": net_amount,
+                "payment_reference": payment_reference,
+                "isw_payment_id": resp.payment_id,
+                "isw_rrn": resp.retrieval_reference_number,
+                "status": "paid",
+            })).await;
+
+            Ok(HttpResponse::Ok().json(ApiResponse::<()>::success((), "Payment completed")))
+        }
+        Err(err) => {
+            let failure_reason = err.to_string();
+            sqlx::query(
+                "INSERT INTO transactions (business_id, session_id, amount, fee, net_amount, status, payment_reference, merchant_ref, metadata, failure_reason, environment) \
+                 VALUES ($1, $2, $3, $4, $5, 'failed', $6, $7, $8, $9, $10)"
+            )
+            .bind(ctx.business_id)
+            .bind(session_id)
+            .bind(session.amount)
+            .bind(fee)
+            .bind(net_amount)
+            .bind(payment_reference)
+            .bind(&session.merchant_ref)
+            .bind(&session.metadata)
+            .bind(&failure_reason)
+            .bind(&ctx.environment)
+            .execute(pool.get_ref())
+            .await?;
+
+            // Reset session so it can be retried or cancelled; clear auth data
+            sqlx::query("UPDATE payment_sessions SET status = $1, encrypted_auth_data = NULL WHERE id = $2")
+                .bind(session_status::LOCKED)
+                .bind(session_id)
+                .execute(pool.get_ref())
+                .await?;
+
+            webhook_service.dispatch(pool.get_ref(), ctx.business_id, "charge.failed", serde_json::json!({
+                "session_id": session_id,
+                "payment_reference": payment_reference,
+                "error": err.to_string(),
+            })).await;
+
+            Err(ApiError::BadRequest(format!("OTP validation failed: {}", err)))
+        }
+    }
 }
 
 pub async fn cancel_session(

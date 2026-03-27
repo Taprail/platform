@@ -17,6 +17,12 @@ const VALID_EVENTS: &[&str] = &[
     "session.cancelled",
     "charge.succeeded",
     "charge.failed",
+    "refund.created",
+    "refund.completed",
+    "dispute.created",
+    "dispute.updated",
+    "dispute.closed",
+    "settlement.completed",
 ];
 
 pub async fn create_endpoint(
@@ -155,6 +161,56 @@ pub async fn list_deliveries(
     let deliveries: Vec<WebhookDeliveryResponse> = deliveries.into_iter().map(Into::into).collect();
 
     Ok(HttpResponse::Ok().json(ApiResponse::success(deliveries, "Webhook deliveries retrieved")))
+}
+
+pub async fn get_delivery(
+    pool: web::Data<PgPool>,
+    req: HttpRequest,
+    jwt_secret: web::Data<String>,
+    path: web::Path<Uuid>,
+) -> Result<HttpResponse, ApiError> {
+    let claims = extract_dashboard_claims(&req, &jwt_secret)?;
+    let business_id: Uuid = claims.business_id.parse()
+        .map_err(|_| ApiError::Internal("Invalid business ID".into()))?;
+    let delivery_id = path.into_inner();
+
+    let delivery: Option<crate::db::WebhookDelivery> = sqlx::query_as(
+        "SELECT * FROM webhook_deliveries WHERE id = $1 AND business_id = $2"
+    )
+    .bind(delivery_id)
+    .bind(business_id)
+    .fetch_optional(pool.get_ref())
+    .await?;
+
+    let delivery = delivery.ok_or_else(|| ApiError::NotFound("Delivery not found".into()))?;
+
+    // Get the endpoint URL for context
+    let endpoint_url: Option<(String,)> = sqlx::query_as(
+        "SELECT url FROM webhook_endpoints WHERE id = $1"
+    )
+    .bind(delivery.endpoint_id)
+    .fetch_optional(pool.get_ref())
+    .await?;
+
+    Ok(HttpResponse::Ok().json(serde_json::json!({
+        "success": true,
+        "data": {
+            "id": delivery.id,
+            "endpoint_id": delivery.endpoint_id,
+            "endpoint_url": endpoint_url.map(|e| e.0),
+            "event_type": delivery.event_type,
+            "payload": delivery.payload,
+            "status": delivery.status,
+            "attempts": delivery.attempts,
+            "max_attempts": delivery.max_attempts,
+            "last_response_code": delivery.last_response_code,
+            "last_response_body": delivery.last_response_body,
+            "next_retry_at": delivery.next_retry_at,
+            "created_at": delivery.created_at,
+            "delivered_at": delivery.delivered_at,
+        },
+        "message": "Delivery retrieved"
+    })))
 }
 
 pub async fn test_webhook(

@@ -2,6 +2,7 @@ use reqwest::Client;
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 pub struct SwitchVerifyResponse {
     pub status: String,
     pub reference: String,
@@ -51,6 +52,7 @@ impl SwitchService {
         }
     }
 
+    #[allow(dead_code)]
     pub async fn verify_transaction(
         &self,
         reference: &str,

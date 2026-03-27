@@ -4,19 +4,32 @@ import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table'
 import { Skeleton } from '@/components/ui/skeleton'
+import { Modal, ModalHeader, ModalTitle, ModalDescription, ModalBody, ModalFooter } from '@/components/ui/modal'
 import { api } from '@/lib/api'
 import { formatDate } from '@/lib/utils'
 import { useToast } from '@/hooks/use-toast'
-import { Plus, Copy, Check, Trash2 } from 'lucide-react'
+import { EmptyState } from '@/components/ui/empty-state'
+import { HugeiconsIcon } from '@hugeicons/react'
+import PlusSignIcon from '@hugeicons/core-free-icons/PlusSignIcon'
+import Copy01Icon from '@hugeicons/core-free-icons/Copy01Icon'
+import Tick01Icon from '@hugeicons/core-free-icons/Tick01Icon'
+import Delete01Icon from '@hugeicons/core-free-icons/Delete01Icon'
+import Key01Icon from '@hugeicons/core-free-icons/Key01Icon'
+import ArrowDown01Icon from '@hugeicons/core-free-icons/ArrowDown01Icon'
+import ArrowRight01Icon from '@hugeicons/core-free-icons/ArrowRight01Icon'
+import Book01Icon from '@hugeicons/core-free-icons/Book01Icon'
+import { Link } from 'react-router-dom'
 
 export default function ApiKeys() {
   const { toast } = useToast()
   const [keys, setKeys] = useState([])
   const [loading, setLoading] = useState(true)
+  const [showCreate, setShowCreate] = useState(false)
   const [creating, setCreating] = useState(false)
   const [newKeys, setNewKeys] = useState(null)
   const [copied, setCopied] = useState(null)
   const [label, setLabel] = useState('')
+  const [quickStartOpen, setQuickStartOpen] = useState(false)
 
   async function loadKeys() {
     try {
@@ -37,6 +50,7 @@ export default function ApiKeys() {
       const res = await api.post('/dashboard/api-keys', { label: label || undefined })
       setNewKeys(res.data)
       setLabel('')
+      setShowCreate(false)
       loadKeys()
       toast({ title: 'API keys created', description: "Copy them now — they won't be shown again." })
     } catch (err) {
@@ -65,65 +79,128 @@ export default function ApiKeys() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-lg font-semibold tracking-tight">API Keys</h1>
-        <p className="text-[13px] text-muted-foreground mt-0.5">Manage your test and live API keys</p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-xl font-semibold tracking-tight">API Keys</h1>
+          <p className="text-[13px] text-muted-foreground mt-1">Manage your test and live API keys</p>
+        </div>
+        <Button onClick={() => setShowCreate(true)}>
+          <HugeiconsIcon icon={PlusSignIcon} size={14} strokeWidth={1.5} className="mr-1.5" />
+          Generate keys
+        </Button>
       </div>
 
-      <div className="rounded-lg border bg-white p-5 space-y-4">
-        <div>
-          <p className="text-sm font-medium">Generate new key pair</p>
-          <p className="text-xs text-muted-foreground mt-0.5">Creates both a test and live key</p>
-        </div>
-        <div className="flex gap-2">
+      {/* Generate Key Modal */}
+      <Modal open={showCreate} onOpenChange={setShowCreate}>
+        <ModalHeader>
+          <ModalTitle>Generate new key pair</ModalTitle>
+          <ModalDescription>Creates both a test and live key for your integration.</ModalDescription>
+        </ModalHeader>
+        <ModalBody>
           <Input
             placeholder="Label (optional)"
             value={label}
             onChange={(e) => setLabel(e.target.value)}
-            className="max-w-xs"
+            autoFocus
           />
+        </ModalBody>
+        <ModalFooter>
+          <Button variant="outline" onClick={() => setShowCreate(false)}>Cancel</Button>
           <Button onClick={handleCreate} disabled={creating}>
-            <Plus className="h-3.5 w-3.5 mr-1.5" />
             {creating ? 'Creating...' : 'Generate'}
           </Button>
-        </div>
-      </div>
+        </ModalFooter>
+      </Modal>
 
-      {newKeys && (
-        <div className="rounded-lg border bg-white p-5 space-y-3">
-          <div>
-            <p className="text-sm font-medium">Keys created</p>
-            <p className="text-xs text-muted-foreground">Copy now — these won't be shown again</p>
-          </div>
-          {[
+      {/* Keys Created Modal */}
+      <Modal open={!!newKeys} onOpenChange={(open) => { if (!open) setNewKeys(null) }}>
+        <ModalHeader>
+          <ModalTitle>Keys created</ModalTitle>
+          <ModalDescription>Copy now &mdash; these won't be shown again.</ModalDescription>
+        </ModalHeader>
+        <ModalBody className="space-y-3">
+          {newKeys && [
             { label: 'Test', key: newKeys.test_key, id: 'test' },
             { label: 'Live', key: newKeys.live_key, id: 'live' },
           ].map((item) => (
             <div key={item.id} className="flex items-center gap-2">
-              <span className="text-xs text-muted-foreground w-8">{item.label}</span>
-              <code className="flex-1 rounded-md bg-zinc-50 border px-3 py-1.5 text-xs font-mono">{item.key}</code>
+              <span className="text-[11px] text-muted-foreground w-8 shrink-0">{item.label}</span>
+              <code className="flex-1 rounded-lg bg-muted/50 border px-3 py-2 text-[11px] font-mono truncate">{item.key}</code>
               <Button variant="ghost" size="sm" onClick={() => copyToClipboard(item.key, item.id)}>
-                {copied === item.id ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+                {copied === item.id ? <HugeiconsIcon icon={Tick01Icon} size={14} strokeWidth={1.5} className="text-emerald-500" /> : <HugeiconsIcon icon={Copy01Icon} size={14} strokeWidth={1.5} />}
               </Button>
             </div>
           ))}
-          <button onClick={() => setNewKeys(null)} className="text-xs text-muted-foreground hover:text-foreground transition-colors">
-            Dismiss
-          </button>
-        </div>
-      )}
+        </ModalBody>
+        <ModalFooter>
+          <Button variant="outline" onClick={() => setNewKeys(null)}>Done</Button>
+        </ModalFooter>
+      </Modal>
+
+      <div className="rounded-xl border bg-card shadow-card overflow-hidden">
+        <button
+          onClick={() => setQuickStartOpen(!quickStartOpen)}
+          className="flex w-full items-center justify-between p-6 text-left hover:bg-muted/20 transition-colors"
+        >
+          <div className="flex items-center gap-2">
+            <HugeiconsIcon icon={Book01Icon} size={16} strokeWidth={1.5} className="text-muted-foreground/60" />
+            <span className="text-sm font-medium">Quick Start</span>
+          </div>
+          {quickStartOpen ? (
+            <HugeiconsIcon icon={ArrowDown01Icon} size={14} strokeWidth={1.5} className="text-muted-foreground/50" />
+          ) : (
+            <HugeiconsIcon icon={ArrowRight01Icon} size={14} strokeWidth={1.5} className="text-muted-foreground/50" />
+          )}
+        </button>
+        {quickStartOpen && (
+          <div className="border-t border-border/50 px-6 pb-6 pt-4 space-y-4">
+            <div className="space-y-2">
+              <p className="text-[11px] font-semibold text-muted-foreground/70 uppercase tracking-wider">Using your API key</p>
+              <p className="text-sm text-muted-foreground">
+                Include your key in the <code className="rounded bg-muted px-1.5 py-0.5 text-[11px] font-mono">Authorization</code> header:
+              </p>
+              <div className="rounded-md border bg-foreground overflow-hidden">
+                <pre className="p-4 text-[12px] leading-relaxed text-white/80 overflow-x-auto">
+                  <code>Authorization: Bearer sk_test_your_api_key</code>
+                </pre>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <p className="text-[11px] font-semibold text-muted-foreground/70 uppercase tracking-wider">Create a payment session</p>
+              <div className="rounded-md border bg-foreground overflow-hidden">
+                <pre className="p-4 text-[12px] leading-relaxed text-white/80 overflow-x-auto">
+                  <code>{`curl -X POST https://api.taprail.co/v1/payments/sessions \\
+  -H "Authorization: Bearer YOUR_API_KEY" \\
+  -H "Content-Type: application/json" \\
+  -d '{"amount": 5000, "merchant_ref": "order_123"}'`}</code>
+                </pre>
+              </div>
+            </div>
+            <Link
+              to="/docs"
+              className="inline-flex items-center gap-1.5 text-xs font-medium text-primary hover:underline underline-offset-4"
+            >
+              <HugeiconsIcon icon={Book01Icon} size={14} strokeWidth={1.5} />
+              View full API documentation
+            </Link>
+          </div>
+        )}
+      </div>
 
       {loading ? (
-        <div className="space-y-3">
+        <div className="space-y-2">
           {[...Array(4)].map((_, i) => <Skeleton key={i} className="h-10 w-full" />)}
         </div>
       ) : keys.length === 0 ? (
-        <div className="rounded-lg border bg-white py-12 text-center">
-          <p className="text-sm text-muted-foreground">No API keys yet</p>
-          <p className="text-xs text-muted-foreground mt-1">Generate a pair above to get started.</p>
-        </div>
+        <EmptyState
+          icon={Key01Icon}
+          title="No API keys yet"
+          description="Generate a key pair to start integrating Taprail into your application."
+          action={() => setShowCreate(true)}
+          actionLabel="Generate keys"
+        />
       ) : (
-        <div className="rounded-lg border bg-white overflow-hidden">
+        <div className="rounded-xl border bg-card shadow-card overflow-hidden">
           <Table>
             <TableHeader>
               <TableRow className="hover:bg-transparent">
@@ -138,9 +215,9 @@ export default function ApiKeys() {
             </TableHeader>
             <TableBody>
               {keys.map((key) => (
-                <TableRow key={key.id} className="hover:bg-zinc-50">
+                <TableRow key={key.id} className="hover:bg-muted/30">
                   <TableCell className="font-medium">{key.label}</TableCell>
-                  <TableCell className="font-mono text-xs text-muted-foreground">
+                  <TableCell className="font-mono text-[11px] text-muted-foreground">
                     {key.key_prefix}_...{key.last4}
                   </TableCell>
                   <TableCell>
@@ -153,14 +230,14 @@ export default function ApiKeys() {
                       {key.is_active ? 'Active' : 'Revoked'}
                     </Badge>
                   </TableCell>
-                  <TableCell className="text-xs text-muted-foreground">{formatDate(key.created_at)}</TableCell>
-                  <TableCell className="text-xs text-muted-foreground">
+                  <TableCell className="text-[11px] text-muted-foreground">{formatDate(key.created_at)}</TableCell>
+                  <TableCell className="text-[11px] text-muted-foreground">
                     {key.last_used_at ? formatDate(key.last_used_at) : '-'}
                   </TableCell>
                   <TableCell>
                     {key.is_active && (
-                      <button onClick={() => handleRevoke(key.id)} className="text-muted-foreground hover:text-destructive transition-colors">
-                        <Trash2 className="h-3.5 w-3.5" />
+                      <button onClick={() => handleRevoke(key.id)} className="text-muted-foreground/40 hover:text-destructive transition-colors">
+                        <HugeiconsIcon icon={Delete01Icon} size={14} strokeWidth={1.5} />
                       </button>
                     )}
                   </TableCell>

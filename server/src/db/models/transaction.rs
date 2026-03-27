@@ -8,6 +8,7 @@ pub struct Transaction {
     pub id: Uuid,
     pub business_id: Uuid,
     pub session_id: Option<Uuid>,
+    pub customer_id: Option<Uuid>,
     pub amount: f64,
     pub fee: f64,
     pub net_amount: f64,
@@ -16,6 +17,9 @@ pub struct Transaction {
     pub payment_reference: Option<String>,
     pub merchant_ref: Option<String>,
     pub metadata: Option<serde_json::Value>,
+    pub failure_reason: Option<String>,
+    pub provider_reference: Option<String>,
+    pub environment: String,
     pub created_at: DateTime<Utc>,
 }
 
@@ -23,6 +27,7 @@ pub struct Transaction {
 pub struct TransactionResponse {
     pub id: Uuid,
     pub session_id: Option<Uuid>,
+    pub customer_id: Option<Uuid>,
     pub amount: f64,
     pub fee: f64,
     pub net_amount: f64,
@@ -31,6 +36,9 @@ pub struct TransactionResponse {
     pub payment_reference: Option<String>,
     pub merchant_ref: Option<String>,
     pub metadata: Option<serde_json::Value>,
+    pub failure_reason: Option<String>,
+    pub provider_reference: Option<String>,
+    pub environment: String,
     pub created_at: DateTime<Utc>,
 }
 
@@ -39,6 +47,7 @@ impl From<Transaction> for TransactionResponse {
         Self {
             id: t.id,
             session_id: t.session_id,
+            customer_id: t.customer_id,
             amount: t.amount,
             fee: t.fee,
             net_amount: t.net_amount,
@@ -47,6 +56,9 @@ impl From<Transaction> for TransactionResponse {
             payment_reference: t.payment_reference,
             merchant_ref: t.merchant_ref,
             metadata: t.metadata,
+            failure_reason: t.failure_reason,
+            provider_reference: t.provider_reference,
+            environment: t.environment,
             created_at: t.created_at,
         }
     }
@@ -59,6 +71,9 @@ pub struct TransactionQuery {
     pub status: Option<String>,
     pub from: Option<String>,
     pub to: Option<String>,
+    pub search: Option<String>,
+    pub environment: Option<String>,
+    pub customer_id: Option<String>,
 }
 
 impl TransactionQuery {

@@ -1,7 +1,8 @@
 import * as React from 'react'
 import * as ToastPrimitive from '@radix-ui/react-toast'
 import { cn } from '@/lib/utils'
-import { X } from 'lucide-react'
+import { HugeiconsIcon } from '@hugeicons/react'
+import Cancel01Icon from '@hugeicons/core-free-icons/Cancel01Icon'
 
 const ToastProvider = ToastPrimitive.Provider
 
@@ -42,7 +43,7 @@ const ToastClose = React.forwardRef(({ className, ...props }, ref) => (
     toast-close=""
     {...props}
   >
-    <X className="h-3.5 w-3.5" />
+    <HugeiconsIcon icon={Cancel01Icon} size={14} strokeWidth={1.8} />
   </ToastPrimitive.Close>
 ))
 ToastClose.displayName = 'ToastClose'

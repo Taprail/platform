@@ -14,6 +14,7 @@ pub struct Business {
     pub fee_cap: f64,
     pub webhook_secret: String,
     pub status: String,
+    pub kyb_status: String,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -28,6 +29,7 @@ pub struct BusinessResponse {
     pub fee_percent: f64,
     pub fee_cap: f64,
     pub status: String,
+    pub kyb_status: String,
     pub created_at: DateTime<Utc>,
 }
 
@@ -42,6 +44,7 @@ impl From<Business> for BusinessResponse {
             fee_percent: b.fee_percent,
             fee_cap: b.fee_cap,
             status: b.status,
+            kyb_status: b.kyb_status,
             created_at: b.created_at,
         }
     }

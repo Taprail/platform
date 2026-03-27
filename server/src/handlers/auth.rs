@@ -114,6 +114,7 @@ pub async fn register(
                 fee_percent: config.default_fee_percent,
                 fee_cap: config.default_fee_cap,
                 status: "active".to_string(),
+                kyb_status: "not_started".to_string(),
                 created_at: now,
             },
             user: TeamMemberResponse {

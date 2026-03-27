@@ -73,8 +73,8 @@ pub async fn create_session(
     let signature = generate_signature(&payload, &business_secret);
 
     sqlx::query(
-        "INSERT INTO payment_sessions (id, business_id, merchant_ref, amount, nonce, status, signature, metadata, expires_at) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)"
+        "INSERT INTO payment_sessions (id, business_id, merchant_ref, amount, nonce, status, signature, metadata, expires_at, environment) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)"
     )
     .bind(session_id)
     .bind(ctx.business_id)
@@ -85,6 +85,7 @@ pub async fn create_session(
     .bind(&signature)
     .bind(&body.metadata)
     .bind(expires_at)
+    .bind(&ctx.environment)
     .execute(pool.get_ref())
     .await?;
 
@@ -250,8 +251,8 @@ pub async fn charge_session(
     match charge_result {
         Ok(_) => {
             sqlx::query(
-                "INSERT INTO transactions (id, business_id, session_id, amount, fee, net_amount, status, payment_reference, merchant_ref, metadata) \
-                 VALUES ($1, $2, $3, $4, $5, $6, 'success', $7, $8, $9)"
+                "INSERT INTO transactions (id, business_id, session_id, amount, fee, net_amount, status, payment_reference, merchant_ref, metadata, environment) \
+                 VALUES ($1, $2, $3, $4, $5, $6, 'success', $7, $8, $9, $10)"
             )
             .bind(txn_id)
             .bind(ctx.business_id)
@@ -262,6 +263,7 @@ pub async fn charge_session(
             .bind(&payment_reference)
             .bind(&session.merchant_ref)
             .bind(&session.metadata)
+            .bind(&ctx.environment)
             .execute(pool.get_ref())
             .await?;
 
@@ -289,6 +291,7 @@ pub async fn charge_session(
                 TransactionResponse {
                     id: txn_id,
                     session_id: Some(session_id),
+                    customer_id: None,
                     amount: session.amount,
                     fee,
                     net_amount,
@@ -297,16 +300,20 @@ pub async fn charge_session(
                     payment_reference: Some(payment_reference),
                     merchant_ref: session.merchant_ref,
                     metadata: session.metadata,
+                    failure_reason: None,
+                    provider_reference: None,
+                    environment: ctx.environment.clone(),
                     created_at: Utc::now(),
                 },
                 "Payment processed successfully",
             )))
         }
         Err(err) => {
-            // Record failed transaction
+            // Record failed transaction with reason
+            let failure_reason = err.to_string();
             sqlx::query(
-                "INSERT INTO transactions (id, business_id, session_id, amount, fee, net_amount, status, payment_reference, merchant_ref, metadata) \
-                 VALUES ($1, $2, $3, $4, $5, $6, 'failed', $7, $8, $9)"
+                "INSERT INTO transactions (id, business_id, session_id, amount, fee, net_amount, status, payment_reference, merchant_ref, metadata, failure_reason, environment) \
+                 VALUES ($1, $2, $3, $4, $5, $6, 'failed', $7, $8, $9, $10, $11)"
             )
             .bind(txn_id)
             .bind(ctx.business_id)
@@ -317,6 +324,8 @@ pub async fn charge_session(
             .bind(&payment_reference)
             .bind(&session.merchant_ref)
             .bind(&session.metadata)
+            .bind(&failure_reason)
+            .bind(&ctx.environment)
             .execute(pool.get_ref())
             .await?;
 

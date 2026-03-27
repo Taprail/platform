@@ -87,12 +87,16 @@ impl WebhookDeliveryService {
             match result {
                 Ok(resp) => {
                     let status_code = resp.status().as_u16() as i32;
-                    if resp.status().is_success() {
+                    let is_success = resp.status().is_success();
+                    let body = resp.text().await.unwrap_or_default();
+                    let body_truncated = if body.len() > 4096 { &body[..4096] } else { &body };
+                    if is_success {
                         let _ = sqlx::query(
                             "UPDATE webhook_deliveries SET status = 'delivered', attempts = 1, \
-                             last_response_code = $1, delivered_at = NOW() WHERE id = $2"
+                             last_response_code = $1, last_response_body = $2, delivered_at = NOW() WHERE id = $3"
                         )
                         .bind(status_code)
+                        .bind(body_truncated)
                         .bind(delivery_id)
                         .execute(pool)
                         .await;
@@ -100,20 +104,23 @@ impl WebhookDeliveryService {
                         let next_retry = Utc::now() + Duration::seconds(30);
                         let _ = sqlx::query(
                             "UPDATE webhook_deliveries SET attempts = 1, last_response_code = $1, \
-                             next_retry_at = $2 WHERE id = $3"
+                             last_response_body = $2, next_retry_at = $3 WHERE id = $4"
                         )
                         .bind(status_code)
+                        .bind(body_truncated)
                         .bind(next_retry)
                         .bind(delivery_id)
                         .execute(pool)
                         .await;
                     }
                 }
-                Err(_) => {
+                Err(e) => {
                     let next_retry = Utc::now() + Duration::seconds(30);
+                    let err_msg = e.to_string();
                     let _ = sqlx::query(
-                        "UPDATE webhook_deliveries SET attempts = 1, next_retry_at = $1 WHERE id = $2"
+                        "UPDATE webhook_deliveries SET attempts = 1, last_response_body = $1, next_retry_at = $2 WHERE id = $3"
                     )
+                    .bind(&err_msg)
                     .bind(next_retry)
                     .bind(delivery_id)
                     .execute(pool)
@@ -176,40 +183,49 @@ impl WebhookDeliveryService {
             };
 
             match result {
-                Ok(resp) if resp.status().is_success() => {
-                    let _ = sqlx::query(
-                        "UPDATE webhook_deliveries SET status = 'delivered', attempts = $1, \
-                         last_response_code = $2, delivered_at = NOW() WHERE id = $3"
-                    )
-                    .bind(new_attempts)
-                    .bind(resp.status().as_u16() as i32)
-                    .bind(delivery_id)
-                    .execute(pool)
-                    .await;
-                }
                 Ok(resp) => {
+                    let code = resp.status().as_u16() as i32;
+                    let is_ok = resp.status().is_success();
+                    let body = resp.text().await.unwrap_or_default();
+                    let body_truncated = if body.len() > 4096 { &body[..4096] } else { &body };
+                    if is_ok {
+                        let _ = sqlx::query(
+                            "UPDATE webhook_deliveries SET status = 'delivered', attempts = $1, \
+                             last_response_code = $2, last_response_body = $3, delivered_at = NOW() WHERE id = $4"
+                        )
+                        .bind(new_attempts)
+                        .bind(code)
+                        .bind(body_truncated)
+                        .bind(delivery_id)
+                        .execute(pool)
+                        .await;
+                    } else {
+                        let status = if new_attempts >= 5 { "failed" } else { "pending" };
+                        let next_retry = Utc::now() + Duration::seconds(backoff_secs);
+                        let _ = sqlx::query(
+                            "UPDATE webhook_deliveries SET status = $1, attempts = $2, \
+                             last_response_code = $3, last_response_body = $4, next_retry_at = $5 WHERE id = $6"
+                        )
+                        .bind(status)
+                        .bind(new_attempts)
+                        .bind(code)
+                        .bind(body_truncated)
+                        .bind(next_retry)
+                        .bind(delivery_id)
+                        .execute(pool)
+                        .await;
+                    }
+                }
+                Err(e) => {
                     let status = if new_attempts >= 5 { "failed" } else { "pending" };
                     let next_retry = Utc::now() + Duration::seconds(backoff_secs);
                     let _ = sqlx::query(
                         "UPDATE webhook_deliveries SET status = $1, attempts = $2, \
-                         last_response_code = $3, next_retry_at = $4 WHERE id = $5"
+                         last_response_body = $3, next_retry_at = $4 WHERE id = $5"
                     )
                     .bind(status)
                     .bind(new_attempts)
-                    .bind(resp.status().as_u16() as i32)
-                    .bind(next_retry)
-                    .bind(delivery_id)
-                    .execute(pool)
-                    .await;
-                }
-                Err(_) => {
-                    let status = if new_attempts >= 5 { "failed" } else { "pending" };
-                    let next_retry = Utc::now() + Duration::seconds(backoff_secs);
-                    let _ = sqlx::query(
-                        "UPDATE webhook_deliveries SET status = $1, attempts = $2, next_retry_at = $3 WHERE id = $4"
-                    )
-                    .bind(status)
-                    .bind(new_attempts)
+                    .bind(&e.to_string())
                     .bind(next_retry)
                     .bind(delivery_id)
                     .execute(pool)

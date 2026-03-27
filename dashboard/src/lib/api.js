@@ -1,4 +1,5 @@
 const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8082'
+const MODE_KEY = 'taprail_mode'
 
 class ApiClient {
   getToken() {
@@ -11,6 +12,15 @@ class ApiClient {
 
   clearToken() {
     localStorage.removeItem('taprail_token')
+  }
+
+  getMode() {
+    return localStorage.getItem(MODE_KEY) || 'test'
+  }
+
+  _appendEnv(path) {
+    const sep = path.includes('?') ? '&' : '?'
+    return `${path}${sep}env=${this.getMode()}`
   }
 
   async request(path, options = {}) {
@@ -41,8 +51,8 @@ class ApiClient {
     return data
   }
 
-  get(path) {
-    return this.request(path)
+  get(path, { withEnv = false } = {}) {
+    return this.request(withEnv ? this._appendEnv(path) : path)
   }
 
   post(path, body) {
@@ -61,6 +71,18 @@ class ApiClient {
 
   delete(path) {
     return this.request(path, { method: 'DELETE' })
+  }
+
+  async upload(path, formData) {
+    const token = this.getToken()
+    const res = await fetch(`${BASE_URL}${path}`, {
+      method: 'POST',
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      body: formData,
+    })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.message || 'Upload failed')
+    return data
   }
 }
 
